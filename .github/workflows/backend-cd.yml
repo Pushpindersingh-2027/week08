@@ -13,9 +13,9 @@ jobs:
 
     env:
       # Secrets you already created
-      AZ_RG:  ${{ secrets.AZURE_RG }}           # w08-ps-rg
-      AKS:    ${{ secrets.AKS_CLUSTER }}        # w08-ps-aks
-      ACR:    ${{ secrets.ACR_NAME }}           # sit722w08pspushpindersingh2027
+      AZ_RG:  ${{ secrets.AZURE_RG }}           # e.g. w08-ps-rg
+      AKS:    ${{ secrets.AKS_CLUSTER }}        # e.g. w08-ps-aks
+      ACR:    ${{ secrets.ACR_NAME }}           # e.g. sit722w08pspushpindersingh2027
 
       # Service names as defined in k8s manifests
       PRODUCT_SVC: product-service
@@ -66,7 +66,6 @@ jobs:
             echo "Attempt $i/60..."
             PRODUCT_IP=$(kubectl get svc "${PRODUCT_SVC}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
             ORDER_IP=$(kubectl get svc "${ORDER_SVC}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
-
             if [[ -n "${PRODUCT_IP}" && -n "${ORDER_IP}" ]]; then
               echo "Product IP: ${PRODUCT_IP}"
               echo "Order IP:   ${ORDER_IP}"
@@ -82,12 +81,4 @@ jobs:
 
       - name: Capture Product Service IP for Workflow Output
         id: get_product_ip
-        run: echo "external_ip=${{ env.PRODUCT_IP }}" >> $GITHUB_OUTPUT
-
-      - name: Capture Order Service IP for Workflow Output
-        id: get_order_ip
-        run: echo "external_ip=${{ env.ORDER_IP }}" >> $GITHUB_OUTPUT
-
-      - name: Logout from Azure
-        if: always()
-        run: az logout
+        run: echo "external_ip=${{ env.PRODUCT_IP }}" >> $GITHU
