@@ -37,9 +37,21 @@ jobs:
           resource-group: ${{ env.AZ_RG }}
           cluster-name:   ${{ env.AKS }}
 
-      # (Idempotent) ensure AKS is attached to ACR so pulls work
-      - name: Attach ACR permission to AKS
-        run: az aks update -g "$AZ_RG" -n "$AKS" --attach-acr "$ACR"
+      # Make attach-acr idempotent and non-fatal
+      - name: Attach ACR permission to AKS (safe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Trying to attach ACR '${ACR}' to AKS '${AKS}' in RG '${AZ_RG}'..."
+          if [ -z "${ACR:-}" ]; then
+            echo "WARN: ACR secret is empty. Skipping attach-acr."
+            exit 0
+          fi
+          if az acr show -n "${ACR}" >/dev/null 2>&1; then
+            az aks update -g "${AZ_RG}" -n "${AKS}" --attach-acr "${ACR}" || echo "WARN: attach-acr failed (likely already attached or RBAC). Continuing…"
+          else
+            echo "WARN: ACR '${ACR}' not visible to runner identity. Skipping attach-acr."
+          fi
 
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         working-directory: k8s
@@ -81,4 +93,12 @@ jobs:
 
       - name: Capture Product Service IP for Workflow Output
         id: get_product_ip
-        run: echo "external_ip=${{ env.PRODUCT_IP }}" >> $GITHU
+        run: echo "external_ip=${{ env.PRODUCT_IP }}" >> $GITHUB_OUTPUT
+
+      - name: Capture Order Service IP for Workflow Output
+        id: get_order_ip
+        run: echo "external_ip=${{ env.ORDER_IP }}" >> $GITHUB_OUTPUT
+
+      - name: Logout from Azure
+        if: always()
+        run: az logout
