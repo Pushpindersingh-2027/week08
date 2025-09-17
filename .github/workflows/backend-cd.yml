@@ -12,12 +12,10 @@ jobs:
       ORDER_API_IP:   ${{ steps.get_order_ip.outputs.external_ip }}
 
     env:
-      # Secrets (already created in your repo)
-      AZ_RG:  ${{ secrets.AZURE_RG }}            # e.g. w08-ps-rg
-      AKS:    ${{ secrets.AKS_CLUSTER }}         # e.g. w08-ps-aks
-      ACR:    ${{ secrets.ACR_NAME }}            # e.g. sit722w08pspushpindersingh2027
+      AZ_RG:  ${{ secrets.AZURE_RG }}
+      AKS:    ${{ secrets.AKS_CLUSTER }}
+      ACR:    ${{ secrets.ACR_NAME }}
 
-      # Labels in your Service manifests (selectors shown in kubectl output)
       PRODUCT_LABEL: app=product-service
       ORDER_LABEL:   app=order-service
 
@@ -35,17 +33,6 @@ jobs:
         with:
           resource-group: ${{ env.AZ_RG }}
           cluster-name:   ${{ env.AKS }}
-
-      # Safe/idempotent — won't fail pipeline if already attached or not visible
-      - name: Attach ACR permission to AKS (safe)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -n "${ACR:-}" ] && az acr show -n "${ACR}" >/dev/null 2>&1; then
-            az aks update -g "${AZ_RG}" -n "${AKS}" --attach-acr "${ACR}" || echo "WARN: attach-acr failed (already attached or RBAC). Continuing…"
-          else
-            echo "WARN: ACR not set/visible. Skipping attach-acr."
-          fi
 
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         working-directory: k8s
@@ -68,19 +55,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # Discover service names dynamically by label (handles -w08e1 suffix etc.)
-          PRODUCT_SVC=$(kubectl get svc -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}' || true)
-          ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}"   -o jsonpath='{.items[0].metadata.name}' || true)
-
-          echo "Discovered product service: ${PRODUCT_SVC:-<none>}"
-          echo "Discovered order   service: ${ORDER_SVC:-<none>}"
-
-          if [[ -z "${PRODUCT_SVC}" || -z "${ORDER_SVC}" ]]; then
-            echo "ERROR: Could not find services with labels ${PRODUCT_LABEL} and/or ${ORDER_LABEL}."
-            kubectl get svc -o wide
-            exit 1
-          fi
+          PRODUCT_SVC=$(kubectl get svc -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}')
+          ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}" -o jsonpath='{.items[0].metadata.name}')
+          echo "Discovered product service: ${PRODUCT_SVC}"
+          echo "Discovered order   service: ${ORDER_SVC}"
 
           for i in {1..60}; do
             echo "Attempt $i/60..."
