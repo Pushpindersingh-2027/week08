@@ -17,7 +17,7 @@ jobs:
       AKS:    ${{ secrets.AKS_CLUSTER }}         # e.g. w08-ps-aks
       ACR:    ${{ secrets.ACR_NAME }}            # e.g. sit722w08pspushpindersingh2027
 
-      # Labels used in your Service manifests (seen in your kubectl output)
+      # Labels used in your Service manifests (must match your k8s YAML)
       PRODUCT_LABEL: app=product-service
       ORDER_LABEL:   app=order-service
 
@@ -36,7 +36,7 @@ jobs:
           resource-group: ${{ env.AZ_RG }}
           cluster-name:   ${{ env.AKS }}
 
-      # Idempotent + non-fatal attach (you already attached once locally)
+      # Make attach-acr idempotent and non-fatal
       - name: Attach ACR permission to AKS (safe)
         shell: bash
         run: |
@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Discover service names by label (handles -w08e1 suffix)
+          # Discover service names by label (handles dynamic suffix like -w08e1)
           PRODUCT_SVC=$(kubectl get svc -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}')
           ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}" -o jsonpath='{.items[0].metadata.name}')
 
