@@ -12,16 +12,14 @@ jobs:
       ORDER_API_IP:   ${{ steps.get_order_ip.outputs.external_ip }}
 
     env:
-      # from repo secrets
-      AZ_RG:  ${{ secrets.AZURE_RG }}            # w08-ps-rg
-      AKS:    ${{ secrets.AKS_CLUSTER }}         # w08-ps-aks
-      ACR:    ${{ secrets.ACR_NAME }}            # sit722w08pspushpindersingh2027
-      REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}  # sit722w08pspushpindersingh2027.azurecr.io
+      # repo secrets you already created
+      AZ_RG:            ${{ secrets.AZURE_RG }}            # e.g. w08-ps-rg
+      AKS:              ${{ secrets.AKS_CLUSTER }}         # e.g. w08-ps-aks
+      ACR_NAME:         ${{ secrets.ACR_NAME }}            # e.g. sit722w08pspushpindersingh2027
+      REGISTRY:         ${{ secrets.ACR_LOGIN_SERVER }}    # e.g. sit722w08pspushpindersingh2027.azurecr.io
+      IMAGE_TAG:        ${{ github.sha }}
 
-      # image tag = the commit you’re deploying (defaults to the workflow's SHA)
-      IMAGE_TAG: ${{ github.sha }}
-
-      # labels used by your K8s Services/Deployments
+      # labels used in your k8s manifests (DO match these)
       PRODUCT_LABEL: app=product-service
       ORDER_LABEL:   app=order-service
 
@@ -40,18 +38,17 @@ jobs:
           resource-group: ${{ env.AZ_RG }}
           cluster-name:   ${{ env.AKS }}
 
-      # safe / idempotent: won't fail if already attached or not visible to runner
-      - name: Attach ACR permission to AKS (safe)
+      # Optional and safe: won’t fail the run if already attached / not visible
+      - name: Attach ACR permission to AKS (idempotent)
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${ACR:-}" ] && az acr show -n "${ACR}" >/dev/null 2>&1; then
-            az aks update -g "${AZ_RG}" -n "${AKS}" --attach-acr "${ACR}" || echo "WARN: attach-acr skipped."
+          if [ -n "${ACR_NAME:-}" ] && az acr show -n "${ACR_NAME}" >/dev/null 2>&1; then
+            az aks update -g "${AZ_RG}" -n "${AKS}" --attach-acr "${ACR_NAME}" || echo "WARN: attach-acr skipped."
           else
             echo "WARN: ACR not found/visible; skipping --attach-acr."
           fi
 
-      # Apply infra (namespace/config/secrets/dbs) and services
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         working-directory: k8s
         run: |
@@ -66,7 +63,7 @@ jobs:
           kubectl apply -f product-service.yaml
           kubectl apply -f order-service.yaml
 
-      # Always point deployments to the latest images produced by CI
+      # Always bump deployments to the freshly built images from CI
       - name: Update deployments to latest images
         shell: bash
         run: |
@@ -75,7 +72,7 @@ jobs:
           ORDER_DEPLOY=$(kubectl get deploy -l "${ORDER_LABEL}"   -o jsonpath='{.items[0].metadata.name}')
 
           echo "Updating images:"
-          echo "  $PROD_DEPLOY -> $REGISTRY/product-service:$IMAGE_TAG"
+          echo "  $PROD_DEPLOY  -> $REGISTRY/product-service:$IMAGE_TAG"
           echo "  $ORDER_DEPLOY -> $REGISTRY/order-service:$IMAGE_TAG"
 
           kubectl set image deployment/$PROD_DEPLOY  product-service-container=$REGISTRY/product-service:$IMAGE_TAG
@@ -87,14 +84,14 @@ jobs:
       - name: Show services
         run: kubectl get svc -o wide
 
+      # ✅ Dynamic service discovery (works with -w08e1 suffix)
       - name: Wait for Backend LoadBalancer IPs (max ~5 min)
         shell: bash
         run: |
           set -euo pipefail
-
-          # discover service names by label (handles -w08e1 suffixes)
           PRODUCT_SVC=$(kubectl get svc -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}')
           ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}"   -o jsonpath='{.items[0].metadata.name}')
+
           echo "Discovered product service: ${PRODUCT_SVC}"
           echo "Discovered order   service: ${ORDER_SVC}"
 
@@ -102,10 +99,7 @@ jobs:
             echo "Attempt $i/60..."
             PRODUCT_IP=$(kubectl get svc "${PRODUCT_SVC}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
             ORDER_IP=$(kubectl get svc "${ORDER_SVC}"   -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
-
             if [[ -n "${PRODUCT_IP}" && -n "${ORDER_IP}" ]]; then
-              echo "Product IP: ${PRODUCT_IP}"
-              echo "Order IP:   ${ORDER_IP}"
               echo "PRODUCT_IP=${PRODUCT_IP}" >> $GITHUB_ENV
               echo "ORDER_IP=${ORDER_IP}"     >> $GITHUB_ENV
               exit 0
