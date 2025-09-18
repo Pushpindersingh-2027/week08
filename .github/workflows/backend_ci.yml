@@ -14,6 +14,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Echo tests placeholder
         run: echo "Run unit tests/lint here"
 
@@ -21,15 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test_and_lint_backends
     env:
-      # Secrets
-      ACR_NAME: ${{ secrets.ACR_NAME }}                 # e.g. sit722w08pspushpindersingh2027
-      REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}         # e.g. sit722w08pspushpindersingh2027.azurecr.io
-      # Correct build contexts
-      PRODUCT_PATH: backend/product_service
-      ORDER_PATH:   backend/order_service
-      # Image repo names (keep kebab-case unless your k8s manifests expect underscores)
-      PRODUCT_REPO: product-service
-      ORDER_REPO:   order-service
+      ACR_NAME:  ${{ secrets.ACR_NAME }}          # sit722w08pspushpindersingh2027
+      REGISTRY:  ${{ secrets.ACR_LOGIN_SERVER }}  # sit722w08pspushpindersingh2027.azurecr.io
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,24 +37,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${ACR_NAME:-}" ] || [ -z "${REGISTRY:-}" ]; then
-            echo "❌ ACR_NAME or ACR_LOGIN_SERVER is empty. Check repository secrets."
-            exit 1
-          fi
-          echo "✅ Secrets present. Proceeding…"
+          [[ -n "${ACR_NAME:-}" && -n "${REGISTRY:-}" ]] || { echo "Missing ACR secrets"; exit 1; }
 
       - name: Login to Azure Container Registry
         run: az acr login --name "$ACR_NAME"
 
+      # product-service image (context = backend/product_service)
       - name: Build & Push product-service
         run: |
-          docker build -t $REGISTRY/$PRODUCT_REPO:${{ github.sha }} "$PRODUCT_PATH"
-          docker push  $REGISTRY/$PRODUCT_REPO:${{ github.sha }}
+          docker build -t $REGISTRY/product-service:${{ github.sha }} ./backend/product_service
+          docker push  $REGISTRY/product-service:${{ github.sha }}
 
+      # order-service image (context = backend/order_service)
       - name: Build & Push order-service
         run: |
-          docker build -t $REGISTRY/$ORDER_REPO:${{ github.sha }} "$ORDER_PATH"
-          docker push  $REGISTRY/$ORDER_REPO:${{ github.sha }}
+          docker build -t $REGISTRY/order-service:${{ github.sha }} ./backend/order_service
+          docker push  $REGISTRY/order-service:${{ github.sha }}
 
       - name: Logout from Azure
         if: always()

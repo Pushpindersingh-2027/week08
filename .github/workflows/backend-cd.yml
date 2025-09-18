@@ -12,10 +12,16 @@ jobs:
       ORDER_API_IP:   ${{ steps.get_order_ip.outputs.external_ip }}
 
     env:
-      AZ_RG:  ${{ secrets.AZURE_RG }}
-      AKS:    ${{ secrets.AKS_CLUSTER }}
-      ACR:    ${{ secrets.ACR_NAME }}
+      # from repo secrets
+      AZ_RG:  ${{ secrets.AZURE_RG }}            # w08-ps-rg
+      AKS:    ${{ secrets.AKS_CLUSTER }}         # w08-ps-aks
+      ACR:    ${{ secrets.ACR_NAME }}            # sit722w08pspushpindersingh2027
+      REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}  # sit722w08pspushpindersingh2027.azurecr.io
 
+      # image tag = the commit you’re deploying (defaults to the workflow's SHA)
+      IMAGE_TAG: ${{ github.sha }}
+
+      # labels used by your K8s Services/Deployments
       PRODUCT_LABEL: app=product-service
       ORDER_LABEL:   app=order-service
 
@@ -34,6 +40,18 @@ jobs:
           resource-group: ${{ env.AZ_RG }}
           cluster-name:   ${{ env.AKS }}
 
+      # safe / idempotent: won't fail if already attached or not visible to runner
+      - name: Attach ACR permission to AKS (safe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${ACR:-}" ] && az acr show -n "${ACR}" >/dev/null 2>&1; then
+            az aks update -g "${AZ_RG}" -n "${AKS}" --attach-acr "${ACR}" || echo "WARN: attach-acr skipped."
+          else
+            echo "WARN: ACR not found/visible; skipping --attach-acr."
+          fi
+
+      # Apply infra (namespace/config/secrets/dbs) and services
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         working-directory: k8s
         run: |
@@ -48,6 +66,24 @@ jobs:
           kubectl apply -f product-service.yaml
           kubectl apply -f order-service.yaml
 
+      # Always point deployments to the latest images produced by CI
+      - name: Update deployments to latest images
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROD_DEPLOY=$(kubectl get deploy -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}')
+          ORDER_DEPLOY=$(kubectl get deploy -l "${ORDER_LABEL}"   -o jsonpath='{.items[0].metadata.name}')
+
+          echo "Updating images:"
+          echo "  $PROD_DEPLOY -> $REGISTRY/product-service:$IMAGE_TAG"
+          echo "  $ORDER_DEPLOY -> $REGISTRY/order-service:$IMAGE_TAG"
+
+          kubectl set image deployment/$PROD_DEPLOY  product-service-container=$REGISTRY/product-service:$IMAGE_TAG
+          kubectl set image deployment/$ORDER_DEPLOY order-service-container=$REGISTRY/order-service:$IMAGE_TAG
+
+          kubectl rollout status deploy/$PROD_DEPLOY
+          kubectl rollout status deploy/$ORDER_DEPLOY
+
       - name: Show services
         run: kubectl get svc -o wide
 
@@ -55,8 +91,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # discover service names by label (handles -w08e1 suffixes)
           PRODUCT_SVC=$(kubectl get svc -l "${PRODUCT_LABEL}" -o jsonpath='{.items[0].metadata.name}')
-          ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}" -o jsonpath='{.items[0].metadata.name}')
+          ORDER_SVC=$(kubectl get svc -l "${ORDER_LABEL}"   -o jsonpath='{.items[0].metadata.name}')
           echo "Discovered product service: ${PRODUCT_SVC}"
           echo "Discovered order   service: ${ORDER_SVC}"
 
